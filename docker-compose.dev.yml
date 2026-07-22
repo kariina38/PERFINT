@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: finance_tracker_backend_dev
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    command: sh -c "npm install && npm run dev"
+    env_file:
+      - ./server/.env
+    environment:
+      - PORT=3001
+      - NODE_ENV=development
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: finance_tracker_frontend_dev
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_BACKEND_URL=http://backend:3001
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - backend
