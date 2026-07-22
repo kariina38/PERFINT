@@ -19,6 +19,25 @@ app.use((req, res, next) => {
   next();
 });
 
+let dbInitialized = null;
+async function getDbConnection() {
+  if (!dbInitialized) {
+    dbInitialized = initDatabase();
+  }
+  return dbInitialized;
+}
+
+// Middleware to ensure DB is initialized
+app.use(async (req, res, next) => {
+  try {
+    await getDbConnection();
+    next();
+  } catch (err) {
+    console.error("Database connection check failed:", err);
+    res.status(500).json({ error: "Failed to connect to database" });
+  }
+});
+
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/users");
 const walletRoutes = require("./routes/wallets");
@@ -51,18 +70,16 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error." });
 });
 
-// Initialize database and start server
-async function start() {
-  try {
-    await initDatabase();
+// Start server locally if not on Vercel
+if (process.env.VERCEL !== "1") {
+  const PORT = process.env.PORT || 3001;
+  initDatabase().then(() => {
     app.listen(PORT, () => {
       console.log(`🚀 Finance Tracker API server running on http://localhost:${PORT}`);
-      console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
     });
-  } catch (err) {
-    console.error("Failed to start server:", err);
-    process.exit(1);
-  }
+  }).catch(err => {
+    console.error("Failed to start server locally:", err);
+  });
 }
 
-start();
+module.exports = app;
