@@ -98,8 +98,7 @@ export function Login() {
           </div>
 
           {/* Footer Callout */}
-          <div className="relative z-10 text-xs text-blue-200 border-t border-white/10 pt-4 flex items-center justify-between">
-            <span>Powered by Gemini AI</span>
+          <div className="relative z-10 text-xs text-blue-200 border-t border-white/10 pt-4 flex items-center justify-end">
             <span>Join thousands of smart spenders</span>
           </div>
         </div>
