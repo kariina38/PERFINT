@@ -44,16 +44,52 @@ export function AIAdvisor() {
     }
   };
 
-  const renderMessageContent = (content: string) => {
-    if (!content.includes("**")) {
-      return content;
+  const parseInlineMarkdown = (text: string) => {
+    if (!text.includes("**")) {
+      return text;
     }
-    const parts = content.split("**");
+    const parts = text.split("**");
     return parts.map((part, index) => {
       if (index % 2 === 1) {
-        return <strong key={index} className="font-bold">{part}</strong>;
+        return <strong key={index} className="font-bold text-gray-900">{part}</strong>;
       }
       return part;
+    });
+  };
+
+  const renderMessageContent = (content: string) => {
+    const lines = content.split("\n");
+    return lines.map((line, lineIdx) => {
+      // 1. Check for headers (e.g., ### Title)
+      const headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
+      if (headerMatch) {
+        const level = headerMatch[1].length;
+        const text = headerMatch[2];
+        const parsedText = parseInlineMarkdown(text);
+        
+        if (level <= 2) {
+          return <h2 key={lineIdx} className="text-base font-bold text-gray-900 mt-3 mb-1.5">{parsedText}</h2>;
+        } else {
+          return <h3 key={lineIdx} className="text-sm font-bold text-gray-800 mt-2 mb-1">{parsedText}</h3>;
+        }
+      }
+      
+      // 2. Check for bullet points (e.g., * Item or - Item)
+      const bulletMatch = line.match(/^[\*\-]\s+(.*)$/);
+      if (bulletMatch) {
+        const text = bulletMatch[1];
+        const parsedText = parseInlineMarkdown(text);
+        return (
+          <div key={lineIdx} className="flex items-start gap-1.5 ml-2 my-0.5">
+            <span className="text-blue-500 mt-1">•</span>
+            <span className="flex-1">{parsedText}</span>
+          </div>
+        );
+      }
+      
+      // 3. Regular lines
+      const parsedLine = parseInlineMarkdown(line);
+      return <p key={lineIdx} className="min-h-[1rem] my-0.5">{parsedLine}</p>;
     });
   };
 
