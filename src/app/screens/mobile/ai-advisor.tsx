@@ -44,6 +44,19 @@ export function AIAdvisor() {
     }
   };
 
+  const renderMessageContent = (content: string) => {
+    if (!content.includes("**")) {
+      return content;
+    }
+    const parts = content.split("**");
+    return parts.map((part, index) => {
+      if (index % 2 === 1) {
+        return <strong key={index} className="font-bold">{part}</strong>;
+      }
+      return part;
+    });
+  };
+
   const suggestions = [
     "Berapa total saldo saya?",
     "Review pengeluaran bulan ini",
@@ -84,7 +97,7 @@ export function AIAdvisor() {
                 ? "bg-blue-600 text-white rounded-tr-none shadow-md" 
                 : "bg-gray-50 text-gray-800 border border-gray-100 shadow-sm rounded-tl-none whitespace-pre-wrap"
               }`}>
-                {msg.content}
+                {renderMessageContent(msg.content)}
               </div>
             </div>
           </div>
