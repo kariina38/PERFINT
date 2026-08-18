@@ -1,13 +1,54 @@
 const express = require("express");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 const db = require("../db");
 const { authMiddleware } = require("../middleware/auth");
 
 const router = express.Router();
 
-// Initialize Gemini AI
-// Note: User needs to provide GEMINI_API_KEY in .env
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "dummy_key");
+// Helper to call OpenRouter API using native fetch
+async function callOpenRouter(messages, tools = null) {
+  const url = "https://openrouter.ai/api/v1/chat/completions";
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  const model = process.env.AI_MODEL || "google/gemma-4-26b-a4b-it:free";
+
+  if (!apiKey) {
+    throw new Error("OpenRouter API Key is missing. Please configure it in .env");
+  }
+
+  const body = {
+    model: model,
+    messages: messages,
+  };
+
+  if (tools) {
+    body.tools = tools;
+    body.tool_choice = "auto";
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://perfint.vercel.app",
+      "X-Title": "Perfint Finance Tracker",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    let errorMsg = `HTTP error! status: ${response.status}`;
+    try {
+      const errorJson = JSON.parse(errorText);
+      errorMsg = errorJson.error?.message || errorMsg;
+    } catch (_) {}
+    const err = new Error(errorMsg);
+    err.status = response.status;
+    throw err;
+  }
+
+  return await response.json();
+}
 
 // Helper to fetch user financial context
 async function getFinancialContext(userId) {
@@ -30,42 +71,41 @@ async function getFinancialContext(userId) {
   }
 }
 
-// Tools definition for Gemini
-const tools = [
+// Tools definition for OpenRouter (OpenAI-compatible)
+const openRouterTools = [
   {
-    functionDeclarations: [
-      {
-        name: "record_transaction",
-        description: "Records a new financial transaction (expense or income) from the user's message.",
-        parameters: {
-          type: "OBJECT",
-          properties: {
-            type: { 
-              type: "STRING", 
-              enum: ["expense", "income"], 
-              description: "The type of transaction: 'expense' (spending money) or 'income' (getting money)." 
-            },
-            amount: { 
-              type: "NUMBER", 
-              description: "The numerical amount of the transaction." 
-            },
-            category: { 
-              type: "STRING", 
-              description: "The category for this transaction (e.g., Food, Transport, Salary, etc.)." 
-            },
-            wallet_name: { 
-              type: "STRING", 
-              description: "The name of the wallet or account used (e.g., GoPay, Bank, Cash)." 
-            },
-            note: { 
-              type: "STRING", 
-              description: "A brief description or note about the transaction." 
-            },
+    type: "function",
+    function: {
+      name: "record_transaction",
+      description: "Records a new financial transaction (expense or income) from the user's message.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: { 
+            type: "string", 
+            enum: ["expense", "income"], 
+            description: "The type of transaction: 'expense' (spending money) or 'income' (getting money)." 
           },
-          required: ["type", "amount", "category", "wallet_name"]
-        }
+          amount: { 
+            type: "number", 
+            description: "The numerical amount of the transaction." 
+          },
+          category: { 
+            type: "string", 
+            description: "The category for this transaction (e.g., Food, Transport, Salary, etc.)." 
+          },
+          wallet_name: { 
+            type: "string", 
+            description: "The name of the wallet or account used (e.g., GoPay, Bank, Cash)." 
+          },
+          note: { 
+            type: "string", 
+            description: "A brief description or note about the transaction." 
+          },
+        },
+        required: ["type", "amount", "category", "wallet_name"]
       }
-    ]
+    }
   }
 ];
 
@@ -126,57 +166,55 @@ const toolHandlers = {
 router.post("/chat", authMiddleware, async (req, res) => {
   const { message } = req.body;
   
-  if (!process.env.GEMINI_API_KEY) {
+  if (!process.env.OPENROUTER_API_KEY) {
     return res.json({ 
-      reply: "I'm ready to help, but I need a Gemini API Key to function! \n\n1. Get a free key at [Google AI Studio](https://aistudio.google.com/app/apikey)\n2. Add it to your `server/.env` file as `GEMINI_API_KEY=your_key`." 
+      reply: "I'm ready to help, but I need an OpenRouter API Key to function! \n\n1. Get an API key at [OpenRouter](https://openrouter.ai/)\n2. Add it to your `server/.env` file as `OPENROUTER_API_KEY=your_key`." 
     });
   }
 
   const context = await getFinancialContext(req.user.id);
-  // Re-initialize model with tools
-  const model = genAI.getGenerativeModel({ 
-    model: "gemini-flash-latest",
-    tools: tools
-  });
-
-  const chat = model.startChat({
-    history: [
-      {
-        role: "user",
-        parts: [{ text: `You are FinAI, a personal financial advisor. System context: ${JSON.stringify(context)}` }]
-      },
-      {
-        role: "model",
-        parts: [{ text: "Understood. I am FinAI, your financial assistant. I have access to your data and can record transactions for you." }]
-      }
-    ],
-  });
+  const messages = [
+    {
+      role: "system",
+      content: `You are FinAI, a personal financial advisor. System context: ${JSON.stringify(context)}. Understood. I am FinAI, your financial assistant. I have access to your data and can record transactions for you.`
+    },
+    {
+      role: "user",
+      content: message
+    }
+  ];
 
   try {
-    let result = await chat.sendMessage(message);
-    let response = result.response;
-    let call = response.functionCalls();
+    let responseData = await callOpenRouter(messages, openRouterTools);
+    let choice = responseData.choices[0];
+    let replyMessage = choice.message;
 
     // If AI wants to call a tool
-    if (call && call.length > 0) {
-      const toolCall = call[0];
-      if (toolHandlers[toolCall.name]) {
-        const toolResult = await toolHandlers[toolCall.name](toolCall.args, req.user.id);
+    if (replyMessage.tool_calls && replyMessage.tool_calls.length > 0) {
+      const toolCall = replyMessage.tool_calls[0];
+      if (toolHandlers[toolCall.function.name]) {
+        const args = JSON.parse(toolCall.function.arguments);
+        const toolResult = await toolHandlers[toolCall.function.name](args, req.user.id);
         
         // Send tool results back to AI
-        result = await chat.sendMessage([
+        const followUpMessages = [
+          ...messages,
+          replyMessage,
           {
-            functionResponse: {
-              name: toolCall.name,
-              response: { content: toolResult },
-            },
-          },
-        ]);
-        response = result.response;
+            role: "tool",
+            tool_call_id: toolCall.id,
+            name: toolCall.function.name,
+            content: JSON.stringify(toolResult)
+          }
+        ];
+        
+        responseData = await callOpenRouter(followUpMessages);
+        choice = responseData.choices[0];
+        replyMessage = choice.message;
       }
     }
 
-    res.json({ reply: response.text() });
+    res.json({ reply: replyMessage.content });
   } catch (err) {
     console.error("AI Chat error details:", {
       message: err.message,
@@ -197,26 +235,30 @@ router.post("/scan-receipt", authMiddleware, async (req, res) => {
   try {
     const { imageBase64 } = req.body; // Base64 string
 
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(400).json({ error: "Gemini API Key is missing. Please add it to .env" });
+    if (!process.env.OPENROUTER_API_KEY) {
+      return res.status(400).json({ error: "OpenRouter API Key is missing. Please add it to .env" });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
-
-    const prompt = "Extract data from this receipt. Return ONLY a valid JSON object with these keys: merchant (string), amount (number), category (string, pick the best from: Food, Transport, Shopping, Bills, Health, Entertainment, Education, Other), date (string YYYY-MM-DD), note (string, brief summary). If you can't find a value, use null.";
-
-    const result = await model.generateContent([
-      prompt,
+    const messages = [
       {
-        inlineData: {
-          data: imageBase64,
-          mimeType: "image/jpeg",
-        },
-      },
-    ]);
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Extract data from this receipt. Return ONLY a valid JSON object with these keys: merchant (string), amount (number), category (string, pick the best from: Food, Transport, Shopping, Bills, Health, Entertainment, Education, Other), date (string YYYY-MM-DD), note (string, brief summary). If you can't find a value, use null."
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:image/jpeg;base64,${imageBase64}`
+            }
+          }
+        ]
+      }
+    ];
 
-    const response = await result.response;
-    const text = response.text();
+    const responseData = await callOpenRouter(messages);
+    const text = responseData.choices[0].message.content;
     
     // Clean up markdown if AI returns it
     const jsonStr = text.replace(/```json|```/g, "").trim();
@@ -240,8 +282,8 @@ router.post("/scan-receipt", authMiddleware, async (req, res) => {
 router.post("/forecast", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(400).json({ error: "Gemini API Key is missing." });
+    if (!process.env.OPENROUTER_API_KEY) {
+      return res.status(400).json({ error: "OpenRouter API Key is missing." });
     }
 
     // 1. Fetch data for analysis
@@ -255,8 +297,6 @@ router.post("/forecast", authMiddleware, async (req, res) => {
       "SELECT category, amount, date FROM transactions WHERE user_id = $1 AND created_at > NOW() - INTERVAL '60 days'",
       [userId]
     );
-
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
     const prompt = `
       You are a Financial Analyst. Today is ${new Date().toISOString().split('T')[0]}.
@@ -289,8 +329,15 @@ router.post("/forecast", authMiddleware, async (req, res) => {
       }
     `;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const messages = [
+      {
+        role: "user",
+        content: prompt
+      }
+    ];
+
+    const responseData = await callOpenRouter(messages);
+    const text = responseData.choices[0].message.content;
     const jsonStr = text.replace(/```json|```/g, "").trim();
     const forecast = JSON.parse(jsonStr);
 
