@@ -88,15 +88,15 @@ const openRouterTools = [
           },
           amount: { 
             type: "number", 
-            description: "The numerical amount of the transaction." 
+            description: "The numerical amount of the transaction. Crucial: Do NOT call this tool if the amount is not explicitly specified." 
           },
           category: { 
             type: "string", 
-            description: "The category for this transaction (e.g., Food, Transport, Salary, etc.)." 
+            description: "The category for this transaction (e.g., Food, Transport, Salary, etc.). Crucial: Do NOT call this tool if the category/item is not explicitly specified." 
           },
           wallet_name: { 
             type: "string", 
-            description: "The name of the wallet or account used (e.g., GoPay, Bank, Cash)." 
+            description: "The name of the wallet or account used (e.g., GoPay, Bank, Cash). Crucial: Do NOT assume or default a wallet name. Do NOT call this tool if the wallet name is not explicitly specified by the user." 
           },
           note: { 
             type: "string", 
@@ -176,7 +176,16 @@ router.post("/chat", authMiddleware, async (req, res) => {
   const messages = [
     {
       role: "system",
-      content: `You are FinAI, a personal financial advisor. System context: ${JSON.stringify(context)}. Understood. I am FinAI, your financial assistant. I have access to your data and can record transactions for you.`
+      content: `You are FinAI, a personal financial advisor. System context: ${JSON.stringify(context)}.
+Understood. I am FinAI, your financial assistant. I have access to your data and can record transactions for you.
+
+CRITICAL INSTRUCTIONS:
+- You have access to a tool named "record_transaction".
+- Before calling "record_transaction", you MUST ensure that all of the required parameters (type, amount, category, and wallet_name) are explicitly provided, defined, or clear from the user's message.
+- If the user does not specify which wallet/account to use (e.g. "Cash", "Bank BCA", "GoPay"), do NOT call "record_transaction" and do NOT assume/guess a default wallet. Instead, politely reply in Indonesian and ask the user to clarify which wallet they want to use.
+- If the user does not specify the amount (e.g. "saya beli kopi pakai cash"), do NOT call the tool and ask for the amount in Indonesian.
+- If the user does not specify what they bought or the source of income (so the category is unknown), do NOT call the tool and ask for that information in Indonesian.
+- Only execute the transaction once all necessary details are clear and explicitly mentioned.`
     },
     {
       role: "user",
